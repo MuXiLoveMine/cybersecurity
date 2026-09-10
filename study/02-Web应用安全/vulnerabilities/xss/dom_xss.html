@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>DOM 型 XSS 示例</title>
+</head>
+<body>
+    <h1>DOM 型 XSS 示例</h1>
+
+    <p>请在 URL 中添加 # 后面的内容：</p>
+    <pre>dom_xss.html#&lt;img src=x onerror=alert(1)&gt;</pre>
+
+    <!-- 漏洞点 1：innerHTML -->
+    <h3>1. innerHTML 注入</h3>
+    <div id="greet"></div>
+
+    <!-- 漏洞点 2：document.write -->
+    <h3>2. document.write 注入</h3>
+    <div id="output2"></div>
+
+    <!-- 漏洞点 3：eval 执行 -->
+    <h3>3. eval 执行 URL 参数</h3>
+    <div id="calc_result"></div>
+    <p>测试：在 URL 后加 <code>?exp=alert(1)</code></p>
+
+    <script>
+        // ===== 漏洞点 1：innerHTML =====
+        // 从 URL hash 获取参数，直接用 innerHTML 写入页面
+        var hash = location.hash.substring(1);
+        if (hash) {
+            document.getElementById('greet').innerHTML = '你好，' + hash;
+        }
+
+        // ===== 漏洞点 2：document.write =====
+        var name = location.hash.substring(1) || '访客';
+        document.write('<p>欢迎，' + name + '</p>');
+
+        // ===== 漏洞点 3：eval =====
+        function getQuery(name) {
+            var reg = new RegExp('(^|&)' + name + '=([^&]*)(&|$)');
+            var r = window.location.search.substr(1).match(reg);
+            return r ? unescape(r[2]) : null;
+        }
+
+        var exp = getQuery('exp');
+        if (exp) {
+            try {
+                var result = eval(exp);  // 危险！直接执行
+                document.getElementById('calc_result').innerText = '结果: ' + result;
+            } catch (e) {
+                document.getElementById('calc_result').innerText = '错误: ' + e.message;
+            }
+        }
+    </script>
+
+    <hr>
+    <h3>测试 Payload：</h3>
+    <ul>
+        <li><code>dom_xss.html#&lt;img src=x onerror=alert(1)&gt;</code></li>
+        <li><code>dom_xss.html#&lt;svg onload=alert(1)&gt;</code></li>
+        <li><code>dom_xss.html?exp=alert(document.cookie)</code></li>
+    </ul>
+
+    <hr>
+    <h3>修复方法：</h3>
+    <ul>
+        <li>使用 textContent 代替 innerHTML</li>
+        <li>避免使用 eval、setTimeout(string)、setInterval(string)</li>
+        <li>对插入 DOM 的内容进行转义</li>
+        <li>使用安全的模板引擎（默认转义）</li>
+    </ul>
+</body>
+</html>
