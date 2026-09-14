@@ -1,3 +1,4 @@
 .vscode/.checkmarxIgnored
 __pycache__/
 %USERP~1/
+.trae-html-share-packages/
