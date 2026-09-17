@@ -634,3 +634,514 @@ dirsearch -u http://example.com/api/ -w api.txt -e json
 ---
 
 > **延伸学习**：目录扫描是信息收集的重要环节。建议多准备几套字典，针对不同类型的站点使用不同的字典和策略。配合 Burp Suite 的爬虫功能，可以更全面地发现网站内容。
+
+---
+
+## 十二、自定义字典制作
+
+### 12.1 字典制作工具
+
+```bash
+# 1. cewl - 从网站内容生成字典
+cewl http://target.com -w target_words.txt -m 5
+# -m 5: 最小单词长度 5
+
+# 2. TIDOS-Framework - 综合字典生成
+python3 tidos.py -u http://target.com
+
+# 3. 自定义字典合并与去重
+cat dict1.txt dict2.txt dict3.txt | sort -u > merged.txt
+
+# 4. 基于规则生成变体字典
+# 使用 hashcat 规则生成密码/目录变体
+hashcat --stdout base.txt -r /usr/share/hashcat/rules/best64.rule
+
+# 5. 自定义字典脚本
+python3 -c "
+import itertools
+# 生成常见后台路径变体
+base = ['admin', 'manage', 'system', 'config', 'backup', 'test', 'debug', 'api']
+exts = ['.php', '.html', '.jsp', '.asp', '.aspx', '.bak', '.old', '.zip', '.txt']
+for b in base:
+    for e in exts:
+        print(f'/{b}{e}')
+    print(f'/{b}/')
+" > custom_dict.txt
+```
+
+### 12.2 针对性字典制作
+
+```bash
+# 1. CMS 专属字典
+# WordPress
+dirsearch -u http://target.com -w /usr/share/SecLists/Discovery/Web-Content/wordpress.txt
+
+# 2. 基于技术栈的字典
+# PHP 项目
+dirsearch -u http://target.com -e php,inc,bak,old,swp -w php_dirs.txt
+
+# Java 项目
+dirsearch -u http://target.com -e jsp,jspx,war,xml,properties -w java_dirs.txt
+
+# 3. 备份文件专用字典
+# 生成备份文件字典
+python3 -c "
+import datetime
+year = datetime.date.today().year
+for y in range(year-5, year+1):
+    for m in range(1, 13):
+        for ext in ['zip','rar','tar.gz','bak','sql','sql.gz']:
+            print(f'/backup_{y}{m:02d}.{ext}')
+            print(f'/db_{y}{m:02d}.{ext}')
+" > backup_dict.txt
+
+# 4. API 端点字典
+cat > api_dict.txt << 'EOF'
+/api/v1/
+/api/v2/
+/api/users
+/api/admin
+/api/config
+/swagger-ui.html
+/swagger-resources
+/v2/api-docs
+/graphql
+/api/auth
+/api/upload
+/api/download
+EOF
+```
+
+### 12.3 字典优化策略
+
+```
+字典优化原则：
+1. 长度优先：短字典先行，长字典后行
+2. 频率排序：常用路径排在前面
+3. 去重处理：合并多字典时去除重复
+4. 针对性过滤：根据技术栈过滤无关路径
+5. 动态扩展：从已发现路径推导新路径
+
+优化脚本示例：
+# 根据已发现的目录推测隐藏路径
+# 发现 /admin/login.php → 猜测 /admin/config.php, /admin/users.php
+# 发现 /api/v1/users → 猜测 /api/v2/users, /api/v1/admin
+```
+
+---
+
+## 十三、过滤器配置详解
+
+### 13.1 extensions（扩展名配置）
+
+```bash
+# 根据目标技术栈选择扩展名
+
+# PHP 站点
+dirsearch -u http://target.com -e php,php5,php7,php8,inc,phtml,phar
+
+# Java 站点
+dirsearch -u http://target.com -e jsp,jspx,war,do,action,properties,xml
+
+# ASP.NET 站点
+dirsearch -u http://target.com -e aspx,asp,ashx,asmx,config,bak
+
+# 静态站点
+dirsearch -u http://target.com -e html,htm,js,css,json,xml,txt
+
+# 备份文件
+dirsearch -u http://target.com -e bak,old,swp,swo,swn,zip,rar,tar.gz,7z,sql
+
+# 配置文件
+dirsearch -u http://target.com -e env,ini,conf,cfg,xml,yml,yaml,toml,properties
+
+# 通用多扩展名
+dirsearch -u http://target.com -e php,html,js,json,bak,zip,txt,old
+```
+
+### 13.2 threads/retries 配置
+
+```bash
+# 线程数调整策略
+# 低并发（避免 WAF）：5-10 线程
+dirsearch -u http://target.com -t 5 --delay=0.5
+
+# 中等并发（常规测试）：25-50 线程
+dirsearch -u http://target.com -t 25
+
+# 高并发（无防护目标）：100-200 线程
+dirsearch -u http://target.com -t 100
+
+# 重试次数配置
+# 增加重试次数以提高准确性
+dirsearch -u http://target.com --retries=3 --timeout=10
+
+# 配合延迟使用
+dirsearch -u http://target.com -t 10 --delay=0.2 --retries=2
+```
+
+---
+
+## 十四、递归扫描深度配置
+
+```bash
+# 递归扫描深度控制
+
+# 深度1（推荐，平衡速度和覆盖）
+dirsearch -u http://target.com -r --recursion-depth=1
+
+# 深度2（更全面但更慢）
+dirsearch -u http://target.com -r --recursion-depth=2
+
+# 深度3+（非常慢，需长时间运行）
+dirsearch -u http://target.com -r --recursion-depth=3
+
+# 指定递归状态码
+dirsearch -u http://target.com -r --recursion-status=200,301,302,403
+
+# 强制递归（403 也递归）
+dirsearch -u http://target.com -r --force-recursive
+
+# 子目录扫描组合
+dirsearch -u http://target.com \
+  --subdirs=/admin,/backup,/api,/config,/test,/dev,/old \
+  -r --recursion-depth=2 \
+  -e php,bak,zip
+```
+
+---
+
+## 十五、子域名枚举
+
+### 15.1 使用 dirsearch 进行子域名爆破
+
+```bash
+# 子域名爆破（使用 - 子域名格式字典）
+dirsearch -u http://target.com --subdomains -w subdomains.txt
+
+# 常见子域名字典
+# SecLists 子域名字典位置：
+# /usr/share/SecLists/Discovery/DNS/
+
+dirsearch -u http://target.com \
+  --subdomains \
+  -w /usr/share/SecLists/Discovery/DNS/subdomains-top1million-20000.txt
+```
+
+### 15.2 其他子域名收集工具
+
+```bash
+# Sublist3r - 搜索引擎枚举
+python3 sublist3r.py -d target.com -o subdomains.txt
+
+# Amass - 深度子域名收集
+amass enum -d target.com -o amass_results.txt
+
+# Subfinder - 快速被动收集
+subfinder -d target.com -o subfinder_results.txt
+
+# DNS 字典爆破
+python3 dnspop.py -d target.com
+
+# 组合收集后合并去重
+cat sublist3r.txt amass.txt subfinder.txt | sort -u > all_subdomains.txt
+
+# 验证子域名存活
+cat all_subdomains.txt | while read sub; do
+    if curl -s -o /dev/null -w "%{http_code}" "http://$sub" | grep -q "200\|301\|302\|403"; then
+        echo "$sub" >> alive_subs.txt
+    fi
+done
+```
+
+---
+
+## 十六、CDN/WAF 绕过技巧
+
+### 16.1 WAF 检测与绕过
+
+```bash
+# 1. 检测 WAF
+wafw00f http://target.com
+
+# 2. 降低扫描速度绕过 WAF
+dirsearch -u http://target.com -t 5 --delay=2 --random-user-agents
+
+# 3. 使用随机 User-Agent
+dirsearch -u http://target.com --random-user-agents -t 10
+
+# 4. 使用多个代理轮换
+# 配置代理池文件
+cat > proxy_list.txt << 'EOF'
+http://proxy1:8080
+http://proxy2:8080
+socks5://proxy3:1080
+EOF
+
+# 5. 自定义 Header 绕过
+dirsearch -u http://target.com \
+  -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+  -H "Accept: text/html,application/xhtml+xml" \
+  -H "Accept-Language: zh-CN,zh;q=0.9" \
+  -H "X-Forwarded-For: 127.0.0.1" \
+  --delay=0.5 -t 10
+
+# 6. 使用 HEAD 方法（减少流量）
+dirsearch -u http://target.com -m HEAD -t 10
+
+# 7. 使用 Cookie 绕过认证检查
+dirsearch -u http://target.com \
+  --cookie="session=abc123; token=xyz789; auth=true" \
+  -e php -t 25
+```
+
+### 16.2 CDN 绕过（直连真实 IP）
+
+```bash
+# 1. 通过子域名找真实 IP
+# 很多子域名未配置 CDN
+dig dev.target.com
+dig test.target.com
+dig internal.target.com
+
+# 2. 通过历史 DNS 记录
+# 使用 SecurityTrails、ViewDNS 等
+# https://viewdns.info/iphistory/?domain=target.com
+
+# 3. 通过 SSL 证书
+# https://crt.sh/?q=target.com
+# 查看 SSL 证书关联的 IP
+
+# 4. 邮件服务 IP
+# 注册账户接收邮件，查看邮件头中的源 IP
+
+# 5. 全网扫描
+# 使用 fscan 或 zmap 对 IP 段进行反查
+# 确认哪个 IP 上运行了目标网站
+
+# 6. 直连扫描
+# 获取真实 IP 后直接扫描
+dirsearch -u http://真实IP -H "Host: target.com" -e php
+```
+
+---
+
+## 十七、结果导出与分析
+
+### 17.1 结果导出
+
+```bash
+# JSON 报告（便于程序解析）
+dirsearch -u http://target.com -e php --json-report=result.json
+
+# 分析 JSON 结果
+python3 -c "
+import json
+with open('result.json') as f:
+    data = json.load(f)
+for item in data:
+    if item['status'] == 200:
+        print(f\"[200] {item['url']} - {item['length']}B\")
+"
+
+# CSV 报告（便于表格分析）
+dirsearch -u http://target.com -e php --csv-report=result.csv
+
+# Markdown 报告
+dirsearch -u http://target.com -e php --markdown-report=result.md
+```
+
+### 17.2 结果自动化分析
+
+```bash
+# 1. 提取所有 200 状态码路径
+grep "200" result.txt | awk '{print $NF}'
+
+# 2. 提取可能有趣的文件
+grep -E "\.(env|config|backup|sql|bak|swp|zip|rar|git|svn)" result.txt
+
+# 3. 按状态码分组统计
+grep -oP '\d{3}' result.txt | sort | uniq -c | sort -rn
+
+# 4. 提取重定向目标
+grep "301\|302" result.txt | grep -oP 'http[s]?://\S+'
+
+# 5. 提取大文件（可能是备份）
+grep -E "^\[.*\] \d{3} -\s+\d{5,}B" result.txt
+
+# 6. 自动验证结果
+cat result.txt | while read line; do
+    url=$(echo $line | grep -oP 'http\S+')
+    if [ ! -z "$url" ]; then
+        status=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+        echo "[$status] $url"
+    fi
+done
+```
+
+---
+
+## 十八、与其他工具联动
+
+### 18.1 与 ffuf 联动
+
+```bash
+# 使用 dirsearch 快速扫描后用 ffuf 深入
+# 1. dirsearch 快速发现目录
+dirsearch -u http://target.com -e php -t 100 -o results/
+
+# 2. 对发现的目录用 ffuf 深入扫描
+for dir in $(grep "200\|301" results/*.txt | grep -oP '/\w+/'); do
+    ffuf -u http://target.com${dir}FUZZ -w big_dict.txt -mc 200,301,302,403
+done
+
+# ffuf 优势：
+# - 支持更灵活的模糊位置
+# - 可以从 stdout 实时过滤
+# - 支持递归
+# - 支持多种匹配模式
+```
+
+### 18.2 与 gobuster 联动
+
+```bash
+# gobuster 目录扫描
+gobuster dir -u http://target.com -w /usr/share/wordlists/dirb/common.txt -t 50
+
+# gobuster 子域名扫描
+gobuster dns -d target.com -w subdomains.txt -i
+
+# gobuster vhost 虚拟主机扫描
+gobuster vhost -u http://target.com -w vhosts.txt
+
+# 联动策略：
+# 1. gobuster 快速子域名发现
+gobuster dns -d target.com -w subdomains.txt -i -o subs.txt
+# 2. 对每个子域名运行 dirsearch
+for sub in $(cat subs.txt); do
+    dirsearch -u http://$sub -e php,html -t 25
+done
+```
+
+### 18.3 与 Nmap 联动
+
+```bash
+# 1. Nmap 发现 Web 服务
+nmap -sV -p 80,443,8080,8443 10.0.0.0/24 -oG web_hosts.gnmap
+
+# 2. 提取 Web 服务地址
+grep "80/open\|443/open\|8080/open" web_hosts.gnmap | awk '{print $2}'
+
+# 3. 对每个 Web 服务运行 dirsearch
+for host in $(grep "80/open\|443/open" web_hosts.gnmap | awk '{print $2}'); do
+    dirsearch -u http://$host -e php -t 25 -o /results/$host/
+done
+```
+
+---
+
+## 十九、真实渗透测试与 CTF 案例
+
+### 19.1 案例一：发现备份文件导致数据泄露
+
+```
+场景：对某企业网站进行授权渗透测试
+
+步骤：
+1. 基础扫描发现网站使用 PHP
+   dirsearch -u http://target.com -e php -t 50
+
+2. 发现 /backup/ 目录返回 403
+3. 针对备份目录使用备份字典
+   dirsearch -u http://target.com/backup/ -e zip,rar,tar.gz,sql,bak -t 25
+
+4. 发现 /backup/site_2024.zip 返回 200
+5. 下载备份文件，发现：
+   - config.php（数据库凭据）
+   - .env 文件（API 密钥）
+   - 数据库导出文件（用户数据）
+
+教训：备份文件不应存放在 Web 可访问目录
+```
+
+### 19.2 案例二：通过 .git 泄露获取源码
+
+```
+场景：CTF 竞赛
+
+步骤：
+1. 目录扫描发现 /.git/ 目录
+   dirsearch -u http://target.com -e "" --no-extension
+
+2. 使用 GitHack 恢复源码
+   python3 GitHack.py http://target.com/.git/
+
+3. 查看源码发现：
+   - 硬编码的数据库密码
+   - 内部 API 接口
+   - 隐藏的管理后台路径
+
+4. 进一步利用：
+   - 访问管理后台
+   - 使用泄露的凭据登录数据库
+   - 获取 flag
+
+教训：版本控制目录不应暴露在 Web 目录
+```
+
+### 19.3 案例三：API 端点发现
+
+```
+场景：对 REST API 进行安全测试
+
+步骤：
+1. 使用 API 字典扫描
+   dirsearch -u http://target.com/api/ -e json -w api_dict.txt -t 25
+
+2. 发现以下端点：
+   /api/v1/users     → 200（用户列表）
+   /api/v1/admin     → 401（需认证）
+   /api/v1/debug     → 200（调试信息）
+   /api/v2/          → 200（新版本 API）
+
+3. 测试越权：
+   /api/v1/users/1   → 返回用户1的信息
+   /api/v1/users/2   → 返回用户2的信息（水平越权）
+
+4. 发现 /api/v1/debug 泄露：
+   - 服务器内部路径
+   - 环境变量
+   - 数据库连接信息
+
+教训：API 端点需要严格的认证和授权控制
+```
+
+### 19.4 案例四：WAF 绕过扫描
+
+```
+场景：目标部署了 WAF，常规扫描被拦截
+
+步骤：
+1. 常规扫描被 WAF 拦截
+   dirsearch -u http://target.com -e php -t 50
+   → 大量 403 响应
+
+2. 降低速度 + 随机 UA
+   dirsearch -u http://target.com -e php -t 5 --delay=2 --random-user-agents
+
+3. 添加伪造 Header
+   dirsearch -u http://target.com -e php -t 5 \
+     -H "X-Forwarded-For: 127.0.0.1" \
+     -H "X-Real-IP: 127.0.0.1" \
+     --delay=1
+
+4. 使用代理池轮换 IP
+   dirsearch -u http://target.com -e php -t 10 \
+     --proxy=http://proxy1:8080 --delay=1
+
+5. 成功发现隐藏路径：
+   /admin_panel/  → 301
+   /secret_api/   → 200
+
+教训：WAF 绕过需要耐心，低速扫描是关键
+```

