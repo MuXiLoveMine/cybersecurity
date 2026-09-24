@@ -1540,3 +1540,60 @@ echo "请检查 my.cnf 配置文件中的安全设置"
 ---
 
 > ⚠️ **安全提示**：本文档中的所有技术和方法仅用于授权的安全测试和教学研究。MySQL 注入和提权技术在实际环境中可能造成严重的数据泄露和系统破坏。在未获得明确授权的情况下，不得对任何 MySQL 数据库使用上述技术。
+
+---
+
+## 学习资源与知识拓展
+
+### 官方资源
+
+- **MySQL/SQL 官方文档**：各语言官网提供最权威的文档和教程
+- **MySQL/SQL 标准库参考**：官方标准库 API 文档
+
+### 在线教程
+
+- **菜鸟教程 MySQL/SQL**：https://www.runoob.com/ — 中文入门教程
+- **W3Schools**：https://www.w3schools.com/ — 交互式学习平台
+- **MDN Web Docs**：https://developer.mozilla.org/ — Web 技术文档（适用于 JS/HTML/CSS）
+
+### 安全编程资源
+
+- **OWASP 速查表系列**：https://cheatsheetseries.owasp.org/ — 各种安全最佳实践
+- **CWE 常见弱点枚举**：https://cwe.mitre.org/ — 软件弱点分类体系
+- **安全开发指南**：各语言官方安全文档与最佳实践
+
+### 安全工具与库
+
+- 根据语言选择相应的安全库和工具（加密库、HTTP 库、网络库等）
+- 关注 GitHub 上的安全开源项目与社区
+
+### 练习平台
+
+- **LeetCode**：https://leetcode.cn/ — 算法练习平台
+- **Codewars**：https://www.codewars.com/ — 编程挑战网站
+- **Hack The Box**：https://www.hackthebox.com/ — 安全靶场
+- **TryHackMe**：https://tryhackme.com/ — 安全学习房间
+- **Bugku**：https://ctf.bugku.com/ — 国内 CTF 平台
+- **攻防世界**：https://adworld.xctf.org.cn/ — XCTF 竞赛平台
+
+### 推荐书籍
+
+- 《MySQL/SQL程序设计》— 入门经典教材
+- 《MySQL/SQL高级编程》— 进阶学习指南
+- 各类安全相关技术书籍
+
+### 社区与资讯
+
+- **GitHub**：https://github.com/ — 开源项目托管平台
+- **Stack Overflow**：https://stackoverflow.com/ — 编程问答社区
+- **FreeBuf**：https://www.freebuf.com/ — 安全资讯媒体
+- **安全客**：https://www.anquanke.com/ — 安全技术媒体
+- **先知社区**：https://xz.aliyun.com/ — 阿里云安全社区
+
+### 学习路线建议
+
+1. **入门阶段**（1-2月）：掌握基本语法、数据类型、控制流
+2. **进阶阶段**（2-3月）：函数、面向对象、异常处理、标准库
+3. **实战练习**（1-2月）：通过项目巩固知识
+4. **安全方向**（持续）：了解语言相关的安全漏洞和防护
+5. **持续学习**：关注社区、阅读源码、参与开源

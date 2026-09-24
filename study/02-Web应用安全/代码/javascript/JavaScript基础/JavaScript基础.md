@@ -1504,3 +1504,60 @@ async function dirBuster(url, wordlist) {
 ## 总结
 
 JavaScript 是 Web 安全领域必须掌握的编程语言之一。掌握 JavaScript 基础语法、DOM 操作、网络请求和文件操作，对于理解和防御 Web 安全漏洞（如 XSS、CSRF、SQL 注入等）至关重要。建议结合实际的漏洞练习环境（如 DVWA、XSS Game 等）进行实践学习。
+
+---
+
+## 学习资源与知识拓展
+
+### 官方资源
+
+- **JavaScript 官方文档**：各语言官网提供最权威的文档和教程
+- **JavaScript 标准库参考**：官方标准库 API 文档
+
+### 在线教程
+
+- **菜鸟教程 JavaScript**：https://www.runoob.com/ — 中文入门教程
+- **W3Schools**：https://www.w3schools.com/ — 交互式学习平台
+- **MDN Web Docs**：https://developer.mozilla.org/ — Web 技术文档（适用于 JS/HTML/CSS）
+
+### 安全编程资源
+
+- **OWASP 速查表系列**：https://cheatsheetseries.owasp.org/ — 各种安全最佳实践
+- **CWE 常见弱点枚举**：https://cwe.mitre.org/ — 软件弱点分类体系
+- **安全开发指南**：各语言官方安全文档与最佳实践
+
+### 安全工具与库
+
+- 根据语言选择相应的安全库和工具（加密库、HTTP 库、网络库等）
+- 关注 GitHub 上的安全开源项目与社区
+
+### 练习平台
+
+- **LeetCode**：https://leetcode.cn/ — 算法练习平台
+- **Codewars**：https://www.codewars.com/ — 编程挑战网站
+- **Hack The Box**：https://www.hackthebox.com/ — 安全靶场
+- **TryHackMe**：https://tryhackme.com/ — 安全学习房间
+- **Bugku**：https://ctf.bugku.com/ — 国内 CTF 平台
+- **攻防世界**：https://adworld.xctf.org.cn/ — XCTF 竞赛平台
+
+### 推荐书籍
+
+- 《JavaScript程序设计》— 入门经典教材
+- 《JavaScript高级编程》— 进阶学习指南
+- 各类安全相关技术书籍
+
+### 社区与资讯
+
+- **GitHub**：https://github.com/ — 开源项目托管平台
+- **Stack Overflow**：https://stackoverflow.com/ — 编程问答社区
+- **FreeBuf**：https://www.freebuf.com/ — 安全资讯媒体
+- **安全客**：https://www.anquanke.com/ — 安全技术媒体
+- **先知社区**：https://xz.aliyun.com/ — 阿里云安全社区
+
+### 学习路线建议
+
+1. **入门阶段**（1-2月）：掌握基本语法、数据类型、控制流
+2. **进阶阶段**（2-3月）：函数、面向对象、异常处理、标准库
+3. **实战练习**（1-2月）：通过项目巩固知识
+4. **安全方向**（持续）：了解语言相关的安全漏洞和防护
+5. **持续学习**：关注社区、阅读源码、参与开源
